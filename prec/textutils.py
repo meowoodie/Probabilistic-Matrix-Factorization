@@ -8,7 +8,7 @@ vocabulary accordingly.
 '''
 
 from gensim import corpora, models
-from gensim.matutils import corpus2dense, Dense2Corpus
+from gensim.matutils import corpus2dense, Dense2Corpus, corpus2csc
 from collections import defaultdict
 from nltk.util import ngrams
 from six import iteritems
@@ -222,28 +222,32 @@ def merge_documents(corpus, dictionary, docs_ids):
 	'''
 	Merge documents with same doc_id in the corpus according to docs_ids.
 	The function will return the merged corpus and merged docs_ids.
-
-	References:
-	- How to sort a list and reorder a list according to indices?
-	  https://stackoverflow.com/questions/6422700/how-to-get-indices-of-a-sorted-array-in-python/6423325
-	  https://stackoverflow.com/questions/2177590/how-can-i-reorder-a-list
-	- How to group by data by their keys?
-	  https://docs.python.org/2/library/itertools.html#itertools.groupby
 	'''
-	# TODO: Make this function more efficient in the future.
-	dense_corpus   = corpus2dense(corpus, num_terms=len(dictionary)).transpose()
-	ordered_indice = np.argsort(docs_ids)
-	reordered_docs_ids     = [ docs_ids[index] for index in ordered_indice ]
-	reordered_dense_corpus = [ dense_corpus[index] for index in ordered_indice ]
-	reordered_key_values   = zip(reordered_docs_ids, reordered_dense_corpus)
-	merged_key_values      = [
-		[ key_value[0], np.array(list(zip(*list(key_value[1])))[1]).sum(axis=0) ]
-		for key_value in itertools.groupby(reordered_key_values, lambda x: x[0]) ]
-	merged_key_values   = list(zip(*merged_key_values))
-	merged_docs_ids     = merged_key_values[0]
-	merged_dense_corpus = np.array(merged_key_values[1])
-	merged_corpus       = Dense2Corpus(merged_dense_corpus, documents_columns=False)
-	return merged_docs_ids, merged_corpus
+	# # References:
+	# # - How to sort a list and reorder a list according to indices?
+	# #   https://stackoverflow.com/questions/6422700/how-to-get-indices-of-a-sorted-array-in-python/6423325
+	# #   https://stackoverflow.com/questions/2177590/how-can-i-reorder-a-list
+	# # - How to group by data by their keys?
+	# #   https://docs.python.org/2/library/itertools.html#itertools.groupby
+	# # TODO: Make this function more efficient in the future.
+	# dense_corpus   = corpus2dense(corpus, num_terms=len(dictionary)).transpose()
+	ordered_indice     = np.argsort(docs_ids)
+	reordered_docs_ids = [ docs_ids[index] for index in ordered_indice ]
+	# reordered_dense_corpus = [ dense_corpus[index] for index in ordered_indice ]
+	# reordered_key_values   = zip(reordered_docs_ids, reordered_dense_corpus)
+	# merged_key_values      = [
+	# 	[ key_value[0], np.array(list(zip(*list(key_value[1])))[1]).sum(axis=0) ]
+	# 	for key_value in itertools.groupby(reordered_key_values, lambda x: x[0]) ]
+	# merged_key_values   = list(zip(*merged_key_values))
+	# merged_docs_ids     = merged_key_values[0]
+	# merged_dense_corpus = np.array(merged_key_values[1])
+	# merged_corpus       = Dense2Corpus(merged_dense_corpus, documents_columns=False)
+	# return merged_docs_ids, merged_corpus
+
+	sparse_corpus           = corpus2csc(corpus, num_terms=len(dictionary)).transpose()
+	reordered_sparse_corpus = sparse_corpus[ordered_indice, :]
+	
+	print(reordered_sparse_corpus.shape)
 
 
 def corpus_histogram(corpus, dictionary, sort_by='weighted_sum', \

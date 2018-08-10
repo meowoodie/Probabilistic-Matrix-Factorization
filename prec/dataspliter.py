@@ -46,30 +46,35 @@ if __name__ == '__main__':
 
     # TODO: replace the sample data with complete data. Sample data here is only
     #       for testing purpose.
-    # filename = 'data/amazon_reviews_electronics_5.json'
+    # data_filename    = 'data/amazon_reviews_electronics_5.json'
     data_filename    = 'data/sample_data.json'
     corpus_filename  = 'resource/sample.corpus'
     vocab_filename   = 'resource/sample.vocab'
     ratings_filename = 'resource/ratings.txt'
     reviews_filename = 'resource/reviews.txt'
 
-    # Build vocabulary and corpus
-    # TODO: when n is larger than 1. The nltk will raise exception to stop the
-    #       the iteration. The reason caused the issue might be the existance of
-    #       some unexpected characters in the text. This issue should be fixed
-    #       in the future.
-    # - Initiate data generator for yielding the text of reviews iteratively
-    texts = data_generator(data_filename, rating_text_flag=False)
-    #   duplicate the generator for the use of building vocabulary and corpus
-    #   respectively.
-    texts_for_vocab, texts_for_corpus = tee(texts)
-    # - Building vocabulary with Uni-gram terms (n=1)
-    vocab = vocabulary(texts_for_vocab, min_term_freq=1, n=1)
-    vocab.save(vocab_filename)
-    # - Building corpus with Uni-gram terms (n=1)
-    corpus = corpus(texts_for_corpus, vocab, n=1)
-    corpora.MmCorpus.serialize(corpus_filename, corpus)
-    # dense_corpus = corpus2dense(corpus, num_terms=len(vocab)).transpose()
+    # # Build vocabulary and corpus
+    # # TODO: when n is larger than 1. The nltk will raise exception to stop the
+    # #       the iteration. The reason caused the issue might be the existance of
+    # #       some unexpected characters in the text. This issue should be fixed
+    # #       in the future.
+    # # - Initiate data generator for yielding the text of reviews iteratively
+    # texts = data_generator(data_filename, rating_text_flag=False)
+    # #   duplicate the generator for the use of building vocabulary and corpus
+    # #   respectively.
+    # texts_for_vocab, texts_for_corpus = tee(texts)
+    # # - Building vocabulary with Uni-gram terms (n=1)
+    # vocab = vocabulary(texts_for_vocab, min_term_freq=5, n=1)
+    # vocab.save(vocab_filename)
+    # # - Building corpus with Uni-gram terms (n=1)
+    # corpus = corpus(texts_for_corpus, vocab, n=1)
+    # corpora.MmCorpus.serialize(corpus_filename, corpus)
+
+    # Load vocabulary and corpus
+    vocab  = corpora.Dictionary.load(vocab_filename)
+    corpus = corpora.mmcorpus.MmCorpus(corpus_filename)
+    print(vocab)
+    print(corpus)
 
     # Split raw data into `reviews` and `ratings`
     # - Initiate data generator for yielding the review tuple iteratively.
@@ -81,17 +86,18 @@ if __name__ == '__main__':
     ratings, reviews = tee(ratings)
     # - Merge reviews by item ids
     item_ids = [ review[1] for review in reviews ]
-    merged_item_ids, merged_corpus = merge_documents(corpus, vocab, item_ids)
-    #   calculate tfidf for merged corpus
-    tfidf_model        = models.TfidfModel(merged_corpus)
-    merged_tfidf       = tfidf_model[merged_corpus]
-    merged_dense_tfidf = corpus2dense(merged_tfidf, num_terms=len(vocab)).transpose()
-    # - Write ratings and reviews into text files delimited by `\t`
-    with open(ratings_filename, 'w') as ratings_fw, \
-         open(reviews_filename, 'w') as reviews_fw:
-        for rating in ratings:
-            ratings_fw.write('\t'.join(map(str, rating)) + '\n')
-        for review in zip(merged_item_ids, merged_dense_tfidf):
-            item_id = review[0]
-            bow_vec = ','.join(map(str, review[1].tolist()))
-            reviews_fw.write('\t'.join((item_id, bow_vec)) + '\n')
+    # merged_item_ids, merged_corpus = merge_documents(corpus, vocab, item_ids)
+    merge_documents(corpus, vocab, item_ids)
+    # #   calculate tfidf for merged corpus
+    # tfidf_model        = models.TfidfModel(merged_corpus)
+    # merged_tfidf       = tfidf_model[merged_corpus]
+    # merged_dense_tfidf = corpus2dense(merged_tfidf, num_terms=len(vocab)).transpose()
+    # # - Write ratings and reviews into text files delimited by `\t`
+    # with open(ratings_filename, 'w') as ratings_fw, \
+    #      open(reviews_filename, 'w') as reviews_fw:
+    #     for rating in ratings:
+    #         ratings_fw.write('\t'.join(map(str, rating)) + '\n')
+    #     for review in zip(merged_item_ids, merged_dense_tfidf):
+    #         item_id = review[0]
+    #         bow_vec = ','.join(map(str, review[1].tolist()))
+    #         reviews_fw.write('\t'.join((item_id, bow_vec)) + '\n')
