@@ -39,19 +39,24 @@ def data_generator(
                 yield(text)
 
 if __name__ == '__main__':
-    from gensim.matutils import corpus2dense
+    # from gensim.matutils import corpus2dense
     from gensim import corpora, models
-    from textutils import vocabulary, corpus, merge_documents
+    from scipy.sparse import save_npz, load_npz
     from itertools import tee
+    from textutils import vocabulary, corpus, corpus_tfidf, merge_corpus
 
     # TODO: replace the sample data with complete data. Sample data here is only
     #       for testing purpose.
+    # - Input files path
     # data_filename    = 'data/amazon_reviews_electronics_5.json'
-    data_filename    = 'data/sample_data.json'
-    corpus_filename  = 'resource/sample.corpus'
-    vocab_filename   = 'resource/sample.vocab'
-    ratings_filename = 'resource/ratings.txt'
-    reviews_filename = 'resource/reviews.txt'
+    data_filename     = 'data/sample_data.json'
+    corpus_filename   = 'resource/corpus/sample.corpus'
+    vocab_filename    = 'resource/corpus/sample.vocab'
+    # - Output files path
+    ratings_filename  = 'resource/output/ratings.txt'
+    item_ids_filename = 'resource/output/item_ids.txt'
+    user_ids_filename = 'resource/output/user_ids.txt'
+    tfidf_filename    = 'resource/output/tfidf.npz'
 
     # # Build vocabulary and corpus
     # # TODO: when n is larger than 1. The nltk will raise exception to stop the
@@ -86,18 +91,19 @@ if __name__ == '__main__':
     ratings, reviews = tee(ratings)
     # - Merge reviews by item ids
     item_ids = [ review[1] for review in reviews ]
-    # merged_item_ids, merged_corpus = merge_documents(corpus, vocab, item_ids)
-    merge_documents(corpus, vocab, item_ids)
-    # #   calculate tfidf for merged corpus
-    # tfidf_model        = models.TfidfModel(merged_corpus)
-    # merged_tfidf       = tfidf_model[merged_corpus]
-    # merged_dense_tfidf = corpus2dense(merged_tfidf, num_terms=len(vocab)).transpose()
-    # # - Write ratings and reviews into text files delimited by `\t`
-    # with open(ratings_filename, 'w') as ratings_fw, \
-    #      open(reviews_filename, 'w') as reviews_fw:
-    #     for rating in ratings:
-    #         ratings_fw.write('\t'.join(map(str, rating)) + '\n')
-    #     for review in zip(merged_item_ids, merged_dense_tfidf):
-    #         item_id = review[0]
-    #         bow_vec = ','.join(map(str, review[1].tolist()))
-    #         reviews_fw.write('\t'.join((item_id, bow_vec)) + '\n')
+    merged_item_ids, merged_corpus = merge_corpus(corpus, vocab, item_ids)
+    merged_tfidf                   = corpus_tfidf(merged_corpus, vocab)
+
+    # - Write ratings and reviews into text files delimited by `\t`
+    save_npz(tfidf_filename, merged_tfidf)
+    with open(ratings_filename, 'w') as ratings_fw, \
+         open(item_ids_filename, 'w') as items_fw, \
+         open(user_ids_filename, 'w') as users_fw:
+        user_ids = []
+        for rating in ratings:
+            ratings_fw.write('\t'.join(map(str, rating)) + '\n')
+            user_ids.append(rating[0])
+        for item_id in item_ids:
+            items_fw.write(item_id + '\n')
+        for user_id in list(set(user_ids)):
+            users_fw.write(user_id + '\n')

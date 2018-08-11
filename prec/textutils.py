@@ -8,7 +8,8 @@ vocabulary accordingly.
 '''
 
 from gensim import corpora, models
-from gensim.matutils import corpus2dense, Dense2Corpus, corpus2csc
+from gensim.matutils import corpus2dense, Dense2Corpus, Sparse2Corpus, corpus2csc
+from scipy.sparse import csc_matrix, vstack
 from collections import defaultdict
 from nltk.util import ngrams
 from six import iteritems
@@ -213,26 +214,33 @@ def corpus(text_iter_obj, dictionary, \
 					 keep_sents=False, is_tokenzied=True)
 	# Build corpus (numeralize the documents and only keep the terms that exist in dictionary)
 	corpus = [ dictionary.doc2bow(doc) for doc in docs ]
-	# # Calculate tfidf matrix
-	# tfidf = models.TfidfModel(corpus)
-	# tfidf_corpus = tfidf[corpus]
-	return corpus # tfidf_corpus
+	return corpus
 
-def merge_documents(corpus, dictionary, docs_ids):
+def corpus_tfidf(corpus, dictionary):
+	'''
+	Calculate the tfidf matrix for corpus.
+	'''
+	# Calculate tfidf matrix
+	tfidf = models.TfidfModel(corpus)
+	tfidf_corpus = tfidf[corpus]
+	return corpus2csc(tfidf_corpus, num_terms=len(dictionary)).transpose()
+
+def merge_corpus(corpus, dictionary, docs_ids):
 	'''
 	Merge documents with same doc_id in the corpus according to docs_ids.
-	The function will return the merged corpus and merged docs_ids.
+	The function will return the merged corpus and merged docs_ids. Noted that
+	the merged corpus is a sparse matrix in scipy.
 	'''
+	# Deprecated version
 	# # References:
 	# # - How to sort a list and reorder a list according to indices?
 	# #   https://stackoverflow.com/questions/6422700/how-to-get-indices-of-a-sorted-array-in-python/6423325
 	# #   https://stackoverflow.com/questions/2177590/how-can-i-reorder-a-list
 	# # - How to group by data by their keys?
 	# #   https://docs.python.org/2/library/itertools.html#itertools.groupby
-	# # TODO: Make this function more efficient in the future.
 	# dense_corpus   = corpus2dense(corpus, num_terms=len(dictionary)).transpose()
-	ordered_indice     = np.argsort(docs_ids)
-	reordered_docs_ids = [ docs_ids[index] for index in ordered_indice ]
+	# ordered_indice     = np.argsort(docs_ids)
+	# reordered_docs_ids = [ docs_ids[index] for index in ordered_indice ]
 	# reordered_dense_corpus = [ dense_corpus[index] for index in ordered_indice ]
 	# reordered_key_values   = zip(reordered_docs_ids, reordered_dense_corpus)
 	# merged_key_values      = [
@@ -244,11 +252,19 @@ def merge_documents(corpus, dictionary, docs_ids):
 	# merged_corpus       = Dense2Corpus(merged_dense_corpus, documents_columns=False)
 	# return merged_docs_ids, merged_corpus
 
-	sparse_corpus           = corpus2csc(corpus, num_terms=len(dictionary)).transpose()
-	reordered_sparse_corpus = sparse_corpus[ordered_indice, :]
-	
-	print(reordered_sparse_corpus.shape)
-
+	# TODO: Make this function more efficient in the future.
+	# Convert corpus to sparse matrix in Scipy
+	sparse_corpus  = corpus2csc(corpus, num_terms=len(dictionary)).transpose()
+	# Get corpus groups with respect to the indices according to their doc_ids
+	groups         = defaultdict(list)
+	for index, doc_id in enumerate(docs_ids):
+		groups[doc_id].append(index)
+	# Merge corpus with same doc_id
+	id_corpus_obj  = { doc_id:sparse_corpus[indices, :].sum(axis=0) for doc_id, indices in groups.items() }
+	merged_doc_ids = list(id_corpus_obj.keys())
+	merged_corpus  = vstack([ csc_matrix(doc) for doc in list(id_corpus_obj.values()) ])
+	merged_corpus  = Sparse2Corpus(merged_corpus, documents_columns=False)
+	return merged_doc_ids, merged_corpus
 
 def corpus_histogram(corpus, dictionary, sort_by='weighted_sum', \
                      show=False, N=10, file_name='results/test.pdf', title=None):
