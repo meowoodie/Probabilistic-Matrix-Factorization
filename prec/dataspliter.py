@@ -10,6 +10,12 @@ Data Spliter essentially splits the raw data (single json file) into ratings and
 reviews accordingly, which have structure (user_id, item_id, rating) and
 (item_id, text) respectively. In particular, the text is a BoW representation
 (i.e a fixed-sized numerical vector).
+
+Specifically speaking, there are 4 files in total which will be generated in the
+`resource/output` folder. They are `item_ids.txt`, `user_id.txt`, `ratings.txt`,
+and `tfidf.npz` respectively. In particular, `tfidf.npz` is a compressed sparse
+matrix file defined by Scipy, which contains the tfidf matrix of the reviews.
+The row of the matrix is the documents, and the column is the features.
 '''
 
 import json
@@ -93,7 +99,6 @@ if __name__ == '__main__':
     item_ids = [ review[1] for review in reviews ]
     merged_item_ids, merged_corpus = merge_corpus(corpus, vocab, item_ids)
     merged_tfidf                   = corpus_tfidf(merged_corpus, vocab)
-
     # - Write ratings and reviews into text files delimited by `\t`
     save_npz(tfidf_filename, merged_tfidf)
     with open(ratings_filename, 'w') as ratings_fw, \
@@ -103,7 +108,7 @@ if __name__ == '__main__':
         for rating in ratings:
             ratings_fw.write('\t'.join(map(str, rating)) + '\n')
             user_ids.append(rating[0])
-        for item_id in item_ids:
+        for item_id in merged_item_ids:
             items_fw.write(item_id + '\n')
         for user_id in list(set(user_ids)):
             users_fw.write(user_id + '\n')
