@@ -16,7 +16,7 @@ class PMF(object):
     Probabilistic Matrix Factorization
     '''
 
-    def __init__(self, n_feature, epsilon, lam, momentum, n_epoches, n_batches):
+    def __init__(self, n_feature, epsilon, lam, n_epoches, n_batches):
         self.n_feature = n_feature  # number of features
         self.epsilon   = epsilon    # epsilon for leanring rate
         self.lam       = lam        # lambda for L2 regularization
@@ -27,17 +27,14 @@ class PMF(object):
         self.V = None # items feature matrix
         self.U = None # users feature matrix
 
-    def loss(self, ratings, U, V):
+    def loss(self, ratings):
         '''
         Training Loss Function.
-
-        - ratings: a collection of rating triple (user, item, rating).
-        - U:       users feature matrix
-        - V:       items feature matrix
         '''
         errors = [
-            (r_ij - np.dot(U[i] * V[j].T))**2 + self.lam * norm(U[i]) + self.lam * norm(V[j])
-            for i, j, r_ij in ratings ]
+            (float(r_ij) - np.dot(self.U[i], self.V[j].T))**2 + \
+            self.lam * norm(self.U[i]) + self.lam * norm(self.V[j])
+            for i, j, r_ij in ratings]
         return sum(errors)
 
     def sgd_update(self, ratings):
@@ -46,8 +43,8 @@ class PMF(object):
         '''
         for i, j, r_ij in ratings:
             r_ij_hat = np.dot(self.U[i], self.V[j].T)
-            grad_U_i = (r_ij_hat - r_ij) * self.V[j] + self.lam * U[i]
-            grad_V_j = (r_ij_hat - r_ij) * self.U[i] + self.lam * V[j]
+            grad_U_i = (r_ij_hat - float(r_ij)) * self.V[j] + self.lam * self.U[i]
+            grad_V_j = (r_ij_hat - float(r_ij)) * self.U[i] + self.lam * self.V[j]
             self.U[i] = self.U[i] - self.epsilon * grad_U_i
             self.V[j] = self.V[j] - self.epsilon * grad_V_j
 
@@ -72,16 +69,14 @@ class PMF(object):
         # user and item for testing
         test_users = np.array(list(set(test_ratings[:, 0])), dtype='int32')
         test_items = np.array(list(set(test_ratings[:, 1])), dtype='int32')
-        # testing U, V
-        test_U = self.U[test_users, :]
-        test_V = self.V[test_items, :]
         # Initialization
         if self.V is None or self.U is None:
             self.e = 0
             self.U = 0.1 * np.random.randn(n_users, self.n_feature)
             self.V = 0.1 * np.random.randn(n_items, self.n_feature)
-            # delta_U = np.zeros((n_users, self.n_feature))
-            # delta_V = np.zeros((n_items, self.n_feature))
+            # testing U, V
+            test_U = self.U[test_users, :]
+            test_V = self.V[test_items, :]
         # training iterations over epoches
         while self.e < self.n_epoches:
             self.e += 1
@@ -91,28 +86,45 @@ class PMF(object):
             # training iterations over batches
             avg_train_loss = []
             avg_test_loss  = []
+            batch_size     = n_trains / self.n_batches
             for batch in range(self.n_batches):
-                idx       = np.arange(self.batch_size * batch, self.batch_size * (batch + 1))
-                batch_idx = np.mod(idx, n_trains)
-                # users and items appeared in current batch
-                batch_users = np.array(list(set(train_ratings[shuffled_order[batch_idx], 0])), dtype='int32')
-                batch_items = np.array(list(set(train_ratings[shuffled_order[batch_idx], 1])), dtype='int32')
-                # training U, V and ratings selected in current batch
-                batch_U = self.U[batch_users, :]
-                batch_V = self.V[batch_items, :]
+                idx       = np.arange(batch_size * batch, batch_size * (batch + 1))
+                batch_idx = np.mod(idx, n_trains).astype('int32')
+
+                # # users and items appeared in current batch
+                # batch_users = np.array(list(set(train_ratings[shuffled_order[batch_idx], 0])), dtype='int32')
+                # batch_items = np.array(list(set(train_ratings[shuffled_order[batch_idx], 1])), dtype='int32')
+                # batch_U = self.U[batch_users, :]
+                # batch_V = self.V[batch_items, :]
+
+                # training ratings selected in current batch
                 batch_ratings = train_ratings[shuffled_order[batch_idx], :]
                 # update U and V by sgd in a close-formed gradient
-                sgd_update(batch_ratings)
+                self.sgd_update(batch_ratings)
                 # loss for training and testing U, V and ratings
-                train_loss = loss(self, batch_ratings, batch_U, batch_V)
-                test_loss  = loss(self, test_ratings, test_U, test_V)
+                train_loss = self.loss(batch_ratings)
+                test_loss  = self.loss(test_ratings)
                 avg_train_loss.append(train_loss)
                 avg_test_loss.append(test_loss)
             # training log ouput
-            avg_train_loss = mean(avg_train_loss)
-            avg_test_loss  = mean(avg_test_loss)
+            avg_train_loss = np.mean(avg_train_loss)
+            avg_test_loss  = np.mean(avg_test_loss)
             print('[%s] Epoch %d' % (arrow.now(), self.e), file=sys.stderr)
             print('[%s] Training loss:\t%f' % (arrow.now(), avg_train_loss), file=sys.stderr)
             print('[%s] Testing loss:\t%f' % (arrow.now(), avg_test_loss), file=sys.stderr)
 
 if __name__ == '__main__':
+    # Load sample data
+    # ratings = np.loadtxt("resource/output/micro_ratings.txt", delimiter=",")
+    # train_ratings = ratings[0:490000, :]
+    # test_ratings  = ratings[490000:, :]
+    ratings = read_ratings('resource/output/micro_ratings.txt')
+    train_ratings = ratings[0:900, :]
+    test_ratings  = ratings[900:, :]
+    print(train_ratings.shape)
+    print(test_ratings.shape)
+
+    # Substantiate PMF
+    pmf = PMF(n_feature=100, epsilon=0.1, lam=0.1, n_epoches=10, n_batches=100)
+    # Train PMF
+    pmf.fit(train_ratings, test_ratings)
