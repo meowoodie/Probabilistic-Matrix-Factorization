@@ -29,7 +29,7 @@ class PMF(object):
 
     def loss(self, ratings):
         '''
-        Training Loss Function.
+        Loss Function for evaluating matrix U and V
         '''
         errors = [
             (float(r_ij) - np.dot(self.U[i], self.V[j].T))**2 + \
@@ -90,13 +90,6 @@ class PMF(object):
             for batch in range(self.n_batches):
                 idx       = np.arange(batch_size * batch, batch_size * (batch + 1))
                 batch_idx = np.mod(idx, n_trains).astype('int32')
-
-                # # users and items appeared in current batch
-                # batch_users = np.array(list(set(train_ratings[shuffled_order[batch_idx], 0])), dtype='int32')
-                # batch_items = np.array(list(set(train_ratings[shuffled_order[batch_idx], 1])), dtype='int32')
-                # batch_U = self.U[batch_users, :]
-                # batch_V = self.V[batch_items, :]
-
                 # training ratings selected in current batch
                 batch_ratings = train_ratings[shuffled_order[batch_idx], :]
                 # update U and V by sgd in a close-formed gradient
