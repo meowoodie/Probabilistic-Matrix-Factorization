@@ -66,17 +66,11 @@ class PMF(object):
         # get number of items and number of users
         n_users  = int(max(np.amax(train_ratings[:, 0]), np.amax(test_ratings[:, 0]))) + 1
         n_items  = int(max(np.amax(train_ratings[:, 1]), np.amax(test_ratings[:, 1]))) + 1
-        # user and item for testing
-        test_users = np.array(list(set(test_ratings[:, 0])), dtype='int32')
-        test_items = np.array(list(set(test_ratings[:, 1])), dtype='int32')
         # Initialization
         if self.V is None or self.U is None:
             self.e = 0
             self.U = 0.1 * np.random.randn(n_users, self.n_feature)
             self.V = 0.1 * np.random.randn(n_items, self.n_feature)
-            # testing U, V
-            test_U = self.U[test_users, :]
-            test_V = self.V[test_items, :]
         # training iterations over epoches
         while self.e < self.n_epoches:
             self.e += 1
@@ -86,38 +80,43 @@ class PMF(object):
             # training iterations over batches
             avg_train_loss = []
             avg_test_loss  = []
-            batch_size     = n_trains / self.n_batches
+            batch_size     = int(n_trains / self.n_batches)
             for batch in range(self.n_batches):
                 idx       = np.arange(batch_size * batch, batch_size * (batch + 1))
                 batch_idx = np.mod(idx, n_trains).astype('int32')
                 # training ratings selected in current batch
                 batch_ratings = train_ratings[shuffled_order[batch_idx], :]
+                # test ratings sample with the same size as the training batch
+                sample_test_ratings = test_ratings[np.random.choice(len(test_ratings), batch_size), :]
                 # update U and V by sgd in a close-formed gradient
                 self.sgd_update(batch_ratings)
                 # loss for training and testing U, V and ratings
                 train_loss = self.loss(batch_ratings)
-                test_loss  = self.loss(test_ratings)
+                test_loss  = self.loss(sample_test_ratings)
                 avg_train_loss.append(train_loss)
                 avg_test_loss.append(test_loss)
             # training log ouput
-            avg_train_loss = np.mean(avg_train_loss)
-            avg_test_loss  = np.mean(avg_test_loss)
+            avg_train_loss = np.mean(avg_train_loss) / float(batch_size)
+            avg_test_loss  = np.mean(avg_test_loss) / float(batch_size)
             print('[%s] Epoch %d' % (arrow.now(), self.e), file=sys.stderr)
             print('[%s] Training loss:\t%f' % (arrow.now(), avg_train_loss), file=sys.stderr)
             print('[%s] Testing loss:\t%f' % (arrow.now(), avg_test_loss), file=sys.stderr)
 
 if __name__ == '__main__':
     # Load sample data
-    # ratings = np.loadtxt("resource/output/micro_ratings.txt", delimiter=",")
-    # train_ratings = ratings[0:490000, :]
-    # test_ratings  = ratings[490000:, :]
-    ratings = read_ratings('resource/output/micro_ratings.txt')
-    train_ratings = ratings[0:900, :]
-    test_ratings  = ratings[900:, :]
+    ratings        = np.loadtxt("resource/output/ratings_np_mat.txt", delimiter=",").astype('int32')
+    shuffled_order = np.arange(len(ratings))
+    np.random.shuffle(shuffled_order)
+    ratings        = ratings[shuffled_order]
+    train_ratings  = ratings[0:490000, :]
+    test_ratings   = ratings[490000:, :]
+    # ratings = read_ratings('resource/output/micro_ratings.txt')
+    # train_ratings = ratings[0:900, :]
+    # test_ratings  = ratings[900:, :]
     print(train_ratings.shape)
     print(test_ratings.shape)
 
     # Substantiate PMF
-    pmf = PMF(n_feature=100, epsilon=0.1, lam=0.1, n_epoches=10, n_batches=100)
+    pmf = PMF(n_feature=100, epsilon=0.1, lam=0.1, n_epoches=10, n_batches=1000)
     # Train PMF
     pmf.fit(train_ratings, test_ratings)
