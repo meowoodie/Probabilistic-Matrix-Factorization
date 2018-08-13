@@ -18,5 +18,5 @@ import numpy as np
 class DAE(object):
     '''
     '''
-
-    def __init__(self, )
+    
+    def __init__(self, ):
