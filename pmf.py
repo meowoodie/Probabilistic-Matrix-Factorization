@@ -1,9 +1,18 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-"""
+'''
+Probabilistic Matrix Factorization Model and a simple unittest on Amazon Product
+Dataset.
 
-"""
+References:
+- Collaborative Deep Learning for Recommender Systems
+  https://arxiv.org/pdf/1409.2944.pdf
+- Probabilistic Matrix Factorization
+  https://papers.nips.cc/paper/3208-probabilistic-matrix-factorization.pdf
+- Stacked Denoising Autoencoders
+  http://www.jmlr.org/papers/volume11/vincent10a/vincent10a.pdf
+'''
 
 import sys
 import arrow
@@ -20,7 +29,7 @@ class PMF(object):
         self.n_feature = n_feature  # number of features
         self.epsilon   = epsilon    # epsilon for leanring rate
         self.lam       = lam        # lambda for L2 regularization
-        # self.momentum  = momentum   # momentum for gradient descent
+
         self.n_epoches = n_epoches  # number of epoches
         self.n_batches = n_batches  # number of batches
 
@@ -105,16 +114,19 @@ class PMF(object):
 if __name__ == '__main__':
     # Load sample data
     ratings        = np.loadtxt("resource/output/ratings_np_mat.txt", delimiter=",").astype('int32')
+    # shuffle dataset
     shuffled_order = np.arange(len(ratings))
     np.random.shuffle(shuffled_order)
     ratings        = ratings[shuffled_order]
+    # cross validation
     train_ratings  = ratings[0:490000, :]
     test_ratings   = ratings[490000:, :]
+    print(train_ratings.shape)
+    print(test_ratings.shape)
+
     # ratings = read_ratings('resource/output/micro_ratings.txt')
     # train_ratings = ratings[0:900, :]
     # test_ratings  = ratings[900:, :]
-    print(train_ratings.shape)
-    print(test_ratings.shape)
 
     # Substantiate PMF
     pmf = PMF(n_feature=100, epsilon=0.1, lam=0.1, n_epoches=10, n_batches=1000)
