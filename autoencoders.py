@@ -60,6 +60,12 @@ class DAE(object):
         cost      = tf.reduce_mean(tf.pow(x_hat - x, 2))
         optimizer = tf.train.AdamOptimizer(self.lr).minimize(cost)
 
+        # initialization of a new sesssion in tensorflow
+        init = tf.global_variables_initializer()
+        self.sess = tf.Session()
+        self.sess.run(init)
+
+    def fit(self, train_x, test_x):
         
 
 
