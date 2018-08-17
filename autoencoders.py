@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 '''
-Denoising Autoencoders including vanilla version (DAE) and stacked version (SDAE).
+Denoising Autoencoders including vanilla version (dA) and stacked version (SdA).
 
 References:
 - Denoising Autoencoder:
@@ -16,9 +16,9 @@ import numpy as np
 import arrow
 import sys
 
-class DAE(object):
+class dA(object):
     '''
-    Denoising Autoencoder
+    Denoising Autoencoder class (dA)
 
     An extension of a classical autoencoder and it was introduced as a building
     block for deep networks in "Extracting and Composing Robust Features with
@@ -107,6 +107,22 @@ class DAE(object):
 
 
 
+class SdA(object):
+    '''
+    Stacked denoising autoencoder class (SdA)
+
+    A stacked denoising autoencoder model is obtained by stacking several dAs.
+    The hidden layer of the dA at layer `i` becomes the input of the dA at layer
+    `i+1`. The first layer dA gets as input the input of the SdA, and the hidden
+    layer of the last dA represents the output. Note that after pretraining, the
+    SdA is dealt with as a normal MLP, the dAs are only used to initialize the
+    weights.
+    '''
+    def __init__(self, n_visible, hidden_layers_sizes=[200, 100, 50],
+                 keep_prob=0.05, lr=0.1, batch_size=64, n_epoches=10, corrupt_lv=0.2):
+        pass
+
+
 if __name__ == '__main__':
     # An unittest on MNIST data for Denoising Autoencoder
 
@@ -124,6 +140,6 @@ if __name__ == '__main__':
     n_feature = train_x.shape[1]
     n_hidden  = 100
 
-    dae = DAE(n_feature, n_hidden,
+    dae = dA(n_feature, n_hidden,
               keep_prob=0.05, lr=0.01, batch_size=55, n_epoches=10, corrupt_lv=0.2)
     dae.fit(train_x, test_x)
