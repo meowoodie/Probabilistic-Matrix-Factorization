@@ -20,41 +20,46 @@ class dA(object):
     '''
     Denoising Autoencoder class (dA)
 
-    An extension of a classical autoencoder and it was introduced as a building
+    A basic extension of a vanilla autoencoder and it was introduced as a building
     block for deep networks in "Extracting and Composing Robust Features with
     Denoising Autoencoders"
     '''
 
     def __init__(self, n_visible, n_hidden, keep_prob=0.05,
-                 lr=0.1, batch_size=64, n_epoches=10, corrupt_lv=0.2):
+                 lr=0.1, batch_size=64, n_epoches=10, corrupt_lv=0.2,
+                 w=None, b_vis=None, b_hid=None):
         self.lr = lr
         self.n_epoches  = n_epoches
         self.batch_size = batch_size
+        self.w     = w
+        self.b_vis = b_vis
+        self.b_hid = b_hid
 
         # initialization of weights
-        encode_w = tf.get_variable(name='encode_w', shape=(n_visible, n_hidden),
-            dtype=tf.float32, initializer=tf.random_normal_initializer())
-        encode_b = tf.get_variable(name='encode_b', shape=(n_hidden),
-            dtype=tf.float32, initializer=tf.random_normal_initializer())
-
-        decode_w = tf.get_variable(name='decode_w', shape=(n_hidden, n_visible),
-            dtype=tf.float32, initializer=tf.random_normal_initializer())
-        decode_b = tf.get_variable(name='decode_b', shape=(n_visible),
-            dtype=tf.float32, initializer=tf.random_normal_initializer())
+        if not self.w:
+            self.w = tf.get_variable(name='encode_w', shape=(n_visible, n_hidden),
+                dtype=tf.float32, initializer=tf.random_normal_initializer())
+        if not b_vis:
+            self.b_vis = tf.get_variable(name='encode_b', shape=(n_hidden),
+                dtype=tf.float32, initializer=tf.random_normal_initializer())
+        if not b_hid:
+            self.b_hid = tf.get_variable(name='decode_b', shape=(n_visible),
+                dtype=tf.float32, initializer=tf.random_normal_initializer())
+        self.w_prime = tf.transpose(self.w)
 
         # visible input
         self.x = tf.placeholder(tf.float32, (None, n_visible))
 
         # noise mask for corruptting input x
         noise_mask  = np.random.binomial(1, 1 - corrupt_lv, (self.batch_size, n_visible)).astype('float32')
-        corrupted_x = tf.mul(noise_mask, self.x)
+        corrupted_x = tf.multiply(noise_mask, self.x)
 
         # hidden encode
-        z = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, encode_w), encode_b))
+        z = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, w), b_vis))
         z = tf.nn.dropout(z, keep_prob) # probability to keep units
 
         # reconstructed input
-        x_hat = tf.nn.relu6(tf.add(tf.matmul(z, decode_w), decode_b))
+        x_hat = tf.nn.relu6(tf.add(tf.matmul(z, w_prime), b_hid))
 
         # define loss and optimizer, minimize the mean squared error
         self.cost      = tf.reduce_mean(tf.pow(x_hat - self.x, 2))
@@ -120,7 +125,22 @@ class SdA(object):
     '''
     def __init__(self, n_visible, hidden_layers_sizes=[200, 100, 50],
                  keep_prob=0.05, lr=0.1, batch_size=64, n_epoches=10, corrupt_lv=0.2):
-        pass
+        n_layers = len(hidden_layers_sizes)
+        for i in range(n_layers):
+            if i == 0:
+                input_size  = n_visible
+                layer_input = self.x
+            else:
+                input_size  = hidden_layers_sizes[i - 1]
+                layer_input = self.hidden_layers[i - 1]
+
+            n_hidden = hidden_layers_sizes[i]
+
+            hidden_layer = tf.nn.sigmoid(tf.add(layer_input, b_vis))
+
+            dA_layer = dA(n_visible, n_hidden, keep_prob=keep_prob, lr=lr,
+                          batch_size=batch_size, n_epoches=n_epoches, corrupt_lv=corrupt_lv)
+
 
 
 if __name__ == '__main__':
