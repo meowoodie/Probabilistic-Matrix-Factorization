@@ -96,7 +96,7 @@ class PMF(object):
                 # training ratings selected in current batch
                 batch_ratings = train_ratings[shuffled_order[batch_idx], :]
                 # test ratings sample with the same size as the training batch
-                sample_test_ratings = test_ratings[np.random.choice(len(test_ratings), batch_size), :]
+                sample_test_ratings = test_ratings[np.random.choice(n_tests, batch_size), :]
                 # update U and V by sgd in a close-formed gradient
                 self.sgd_update(batch_ratings)
                 # loss for training and testing U, V and ratings
