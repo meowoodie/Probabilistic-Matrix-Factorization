@@ -67,6 +67,7 @@ class DAE(object):
 
     def fit(self, train_x, test_x):
         '''
+        Fit a basic two layers autoencoder
         '''
         n_trains  = train_x.shape[0]
         n_tests   = test_x.shape[0]
@@ -122,7 +123,7 @@ if __name__ == '__main__':
 
     n_feature = train_x.shape[1]
     n_hidden  = 100
-    
+
     dae = DAE(n_feature, n_hidden,
               keep_prob=0.05, lr=0.01, batch_size=55, n_epoches=10, corrupt_lv=0.2)
     dae.fit(train_x, test_x)
