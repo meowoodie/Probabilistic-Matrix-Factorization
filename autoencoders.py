@@ -25,41 +25,57 @@ class dA(object):
     Denoising Autoencoders"
     '''
 
-    def __init__(self, n_visible, n_hidden, keep_prob=0.05,
+    def __init__(self, n_visible, n_hidden, x=None, keep_prob=0.05,
                  lr=0.1, batch_size=64, n_epoches=10, corrupt_lv=0.2,
                  w=None, b_vis=None, b_hid=None):
+        '''
+        Initialize the dA class by specifying the number of visible units, the
+        number of hidden units and the corruption level. The constructor also
+        receives symbolic variables (tensors) for the input `x`, weights `w` and
+        bias `b_vis`, `b_hid` . Such a symbolic variables are useful when, for
+        example the input is the result of some computations, or when weights
+        are shared between the dA and an MLP layer. When dealing with SdAs this
+        always happens.
+        '''
         self.lr = lr
         self.n_epoches  = n_epoches
         self.batch_size = batch_size
-        self.w     = w
-        self.b_vis = b_vis
-        self.b_hid = b_hid
+        self.w     = w     # weights
+        self.b_vis = b_vis # bias of visible layer
+        self.b_hid = b_hid # bias of hidden layer
+        self.z     = None  # hidden encode output
+        self.x     = None  # visible input
+        self.is_stacked = False
 
         # initialization of weights
         if not self.w:
             self.w = tf.get_variable(name='encode_w', shape=(n_visible, n_hidden),
                 dtype=tf.float32, initializer=tf.random_normal_initializer())
-        if not b_vis:
+        if not self.b_vis:
             self.b_vis = tf.get_variable(name='encode_b', shape=(n_hidden),
                 dtype=tf.float32, initializer=tf.random_normal_initializer())
-        if not b_hid:
+        if not self.b_hid:
             self.b_hid = tf.get_variable(name='decode_b', shape=(n_visible),
                 dtype=tf.float32, initializer=tf.random_normal_initializer())
         self.w_prime = tf.transpose(self.w)
 
         # visible input
-        self.x = tf.placeholder(tf.float32, (None, n_visible))
+        if x is None:
+            self.x = tf.placeholder(tf.float32, (None, n_visible))
+        else:
+            self.is_stacked = True
+            self.x = x
 
         # noise mask for corruptting input x
         noise_mask  = np.random.binomial(1, 1 - corrupt_lv, (self.batch_size, n_visible)).astype('float32')
         corrupted_x = tf.multiply(noise_mask, self.x)
 
         # hidden encode
-        z = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, w), b_vis))
-        z = tf.nn.dropout(z, keep_prob) # probability to keep units
+        self.z = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, self.w), self.b_vis))
+        self.z = tf.nn.dropout(self.z, keep_prob) # probability to keep units
 
         # reconstructed input
-        x_hat = tf.nn.relu6(tf.add(tf.matmul(z, w_prime), b_hid))
+        x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.z, self.w_prime), self.b_hid))
 
         # define loss and optimizer, minimize the mean squared error
         self.cost      = tf.reduce_mean(tf.pow(x_hat - self.x, 2))
@@ -97,7 +113,10 @@ class dA(object):
                 batch_x       = train_x[shuffled_order[batch_idx], :]
                 sample_test_x = test_x[np.random.choice(n_tests, self.batch_size), :]
                 # Optimize autoencoder
-                self.sess.run(self.optimizer, feed_dict={self.x: batch_x})
+                if self.is_stacked:
+                    self.sess.run(self.optimizer)
+                else:
+                    self.sess.run(self.optimizer, feed_dict={self.x: batch_x})
                 # loss for train data and test data
                 train_loss = self.sess.run(self.cost, feed_dict={self.x: batch_x})
                 test_loss  = self.sess.run(self.cost, feed_dict={self.x: sample_test_x})
@@ -125,21 +144,53 @@ class SdA(object):
     '''
     def __init__(self, n_visible, hidden_layers_sizes=[200, 100, 50],
                  keep_prob=0.05, lr=0.1, batch_size=64, n_epoches=10, corrupt_lv=0.2):
-        n_layers = len(hidden_layers_sizes)
-        for i in range(n_layers):
+        '''
+        '''
+        self.lr        = lr
+        self.dA_layers = []
+        self.n_layers  = len(hidden_layers_sizes)
+        self.x         = tf.placeholder(tf.float32, (None, n_visible))
+        for i in range(self.n_layers):
             if i == 0:
                 input_size  = n_visible
                 layer_input = self.x
             else:
                 input_size  = hidden_layers_sizes[i - 1]
-                layer_input = self.hidden_layers[i - 1]
+                layer_input = self.hidden_layers[i - 1].z
 
-            n_hidden = hidden_layers_sizes[i]
+            output_size = hidden_layers_sizes[i]
 
-            hidden_layer = tf.nn.sigmoid(tf.add(layer_input, b_vis))
+            dA_layer = dA(n_visible=input_size, n_hidden=output_size,
+                          x=layer_input, keep_prob=keep_prob, lr=lr,
+                          batch_size=batch_size, n_epoches=n_epoches,
+                          corrupt_lv=corrupt_lv)
 
-            dA_layer = dA(n_visible, n_hidden, keep_prob=keep_prob, lr=lr,
-                          batch_size=batch_size, n_epoches=n_epoches, corrupt_lv=corrupt_lv)
+            self.dA_layers.append(dA_layer)
+
+    def logistic_output(self):
+        '''
+        '''
+        self.logistic_pred = tf.nn.softmax(self.hidden_layers[-1].z) # Softmax
+        self.finetune_cost = tf.reduce_mean(-tf.reduce_sum(self.y * tf.log(logistic_pred), reduction_indices=1))
+        self.optimizer     = tf.train.GradientDescentOptimizer(self.lr).minimize(self.finetune_cost)
+
+    def pre_train(self, train_x, test_x):
+        '''
+        Generates a list of functions, each of them implementing one
+        step in trainnig the dA corresponding to the layer with same index.
+        The function will require as input the minibatch index, and to train
+        a dA you just need to iterate, calling the corresponding function on
+        all minibatch indexes.
+        '''
+        for dA_layer in self.dA_layers:
+            cost, updates = dA.get_cost_updates(corruption_level,
+                                                learning_rate)
+
+    def fine_tune(self, train_x, train_y, test_x, test_y):
+        pass
+
+
+
 
 
 
@@ -161,5 +212,5 @@ if __name__ == '__main__':
     n_hidden  = 100
 
     dae = dA(n_feature, n_hidden,
-              keep_prob=0.05, lr=0.01, batch_size=55, n_epoches=10, corrupt_lv=0.2)
+              keep_prob=0.05, lr=0.005, batch_size=55, n_epoches=10, corrupt_lv=0.2)
     dae.fit(train_x, test_x)
