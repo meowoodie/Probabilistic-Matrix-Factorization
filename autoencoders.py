@@ -158,14 +158,17 @@ class SdA(object):
     weights.
     '''
     def __init__(self, n_visible, hidden_layers_sizes=[200, 100, 50],
-                 keep_prob=0.05, lr=0.1, batch_size=64, n_epoches=10,
-                 corrupt_lvs=[0.1, 0.2, 0.3]):
+                 keep_prob=0.05, pretrain_lr=0.005, finetune_lr=0.1,
+                 batch_size=64, n_epoches=5, corrupt_lvs=[0.1, 0.2, 0.3]):
         '''
         '''
-        self.lr        = lr
-        self.dA_layers = []
-        self.n_layers  = len(hidden_layers_sizes)
-        self.x         = tf.placeholder(tf.float32, (None, n_visible))
+        self.finetune_lr = finetune_lr
+        self.pretrain_lr = pretrain_lr
+        self.dA_layers   = []
+        self.n_epoches   = n_epoches
+        self.batch_size  = batch_size
+        self.n_layers    = len(hidden_layers_sizes)
+        self.x           = tf.placeholder(tf.float32, (None, n_visible))
         # construct multiple layers of dAs
         for i in range(self.n_layers):
             # input size and input variable of current dA layer
@@ -180,7 +183,7 @@ class SdA(object):
             # initialize current dA layer
             dA_layer = dA(model_name='stacked_layer_%d_dA' % i,
                           n_visible=input_size, n_hidden=output_size,
-                          x=layer_input, keep_prob=keep_prob, lr=lr,
+                          x=layer_input, keep_prob=keep_prob, lr=self.pretrain_lr,
                           batch_size=batch_size, n_epoches=n_epoches,
                           corrupt_lv=corrupt_lvs[i])
             # append current dA layer to the list
@@ -190,11 +193,17 @@ class SdA(object):
 
     def supervised_layer(self):
         '''
+        A customized supervised layer for fine tuning SdA. This function can be
+        highly overrided in accordance with the requirements of the application.
+        In general, the supervised layer has to include a supervised (response)
+        variable `self.y`, a `self.finetune_cost` for monitoring the loss of the
+        fine-tuning, and a `self.optimizer` to minimize the difference between
+        prediction (depend on `x`) and `y`.
         '''
         self.y             = tf.placeholder(tf.float32, (None, 1))
-        self.logistic_pred = tf.nn.softmax(self.dA_layers[-1].z) # Softmax
+        logistic_pred      = tf.nn.softmax(self.dA_layers[-1].z) # Softmax
         self.finetune_cost = tf.reduce_mean(-tf.reduce_sum(self.y * tf.log(logistic_pred), reduction_indices=1))
-        self.optimizer     = tf.train.GradientDescentOptimizer(self.lr).minimize(self.finetune_cost)
+        self.optimizer     = tf.train.GradientDescentOptimizer(self.finetune_lr).minimize(self.finetune_cost)
 
     def pretrain(self, sess, train_x, test_x, pretrained=False):
         '''
@@ -209,6 +218,7 @@ class SdA(object):
             init = tf.global_variables_initializer()
             sess.run(init)
         # pre-train each layer of denoising autoencoder
+        print('[%s] --- Pre-train Phase ---' % arrow.now(), file=sys.stderr)
         for dA_layer in self.dA_layers:
             print('[%s] *** Layer (%s) ***' % \
                   (arrow.now(), dA_layer.model_name),
@@ -218,14 +228,55 @@ class SdA(object):
                   file=sys.stderr)
             dA_layer.fit(sess, train_x, test_x, pretrained=True, input_tensor=self.x)
 
-    def fine_tune(self, train_x, train_y, test_x, test_y):
+    def finetune(self, sess, train_x, train_y, test_x, test_y):
         '''
         '''
-        
-
-
-
-
+        print('[%s] --- Fine-tune Phase ---' % arrow.now(), file=sys.stderr)
+        # number of dataset
+        n_trains  = train_x.shape[0]
+        n_tests   = test_x.shape[0]
+        # number of batches
+        n_batches = int(n_trains / self.batch_size)
+        # abort the program
+        # if the batch size is indivisible w.r.t the size of dataset,
+        # or input tensor is undefined when the dA is stacked.
+        assert not n_trains % self.batch_size, 'Indivisible batch size.'
+        assert n_tests > self.batch_size, 'Size of test data should be larger than batch size.'
+        assert train_x.shape[0] == train_y.shape[0] and test_x.shape[0] == test_y.shape[0], \
+               'the size of y and x are inconsistant.'
+        # train iteratively
+        e = 0
+        while e < self.n_epoches:
+            e += 1
+            # shuffle training samples
+            shuffled_order = np.arange(n_trains)
+            np.random.shuffle(shuffled_order)
+            # training iterations over batches
+            avg_train_loss = []
+            avg_test_loss  = []
+            for batch in range(n_batches):
+                idx       = np.arange(self.batch_size * batch, self.batch_size * (batch + 1))
+                batch_idx = np.mod(idx, n_trains).astype('int32')
+                # training entries selected in current batch
+                batch_x       = train_x[shuffled_order[batch_idx], :]
+                batch_y       = train_y[shuffled_order[batch_idx], :]
+                sample_idx    = np.random.choice(n_tests, self.batch_size)
+                sample_test_x = test_x[sample_idx, :]
+                sample_test_y = test_y[sample_idx, :]
+                # Optimize autoencoder
+                sess.run(self.optimizer, feed_dict={self.x: batch_x, self.y: batch_y})
+                # loss for train data and test data
+                train_loss = sess.run(self.finetune_cost, feed_dict={self.x: batch_x, self.y: batch_y})
+                test_loss  = sess.run(self.finetune_cost, feed_dict={self.x: batch_x, self.y: batch_y})
+                # append results to list
+                avg_train_loss.append(train_loss)
+                avg_test_loss.append(test_loss)
+            # training log ouput
+            avg_train_loss = np.mean(avg_train_loss) / float(self.batch_size)
+            avg_test_loss  = np.mean(avg_test_loss) / float(self.batch_size)
+            print('[%s] Epoch %d' % (arrow.now(), e), file=sys.stderr)
+            print('[%s] Training loss:\t%f' % (arrow.now(), avg_train_loss), file=sys.stderr)
+            print('[%s] Testing loss:\t%f' % (arrow.now(), avg_test_loss), file=sys.stderr)
 
 
 
@@ -238,20 +289,26 @@ if __name__ == '__main__':
     from tensorflow.examples.tutorials.mnist import input_data
     mnist = input_data.read_data_sets("MNIST_data/", one_hot=False)
     train_x = np.vstack([img.reshape(-1,) for img in mnist.train.images])
-    train_y = mnist.train.labels
+    train_y = np.reshape(mnist.train.labels, (train_x.shape[0], 1))
+
+    print(train_x.shape)
+    print(train_y.shape)
 
     test_x  = np.vstack([img.reshape(-1,) for img in mnist.test.images])
-    test_y  = mnist.test.labels
+    test_y  = np.reshape(mnist.test.labels, (test_x.shape[0], 1))
 
     n_visible = train_x.shape[1]
     n_hidden  = 100
 
     with tf.Session() as sess:
+        # # Single Denoising Autoencoder
         # da = dA('test', n_feature, n_hidden,
         #          keep_prob=0.05, lr=0.005, batch_size=55, n_epoches=10, corrupt_lv=0.2)
         # da.fit(sess, train_x, test_x)
+
+        # Stacked Denoising Autoencoder
         sda = SdA(n_visible=n_visible, hidden_layers_sizes=[200, 100, 50],
-                  keep_prob=0.05, lr=0.005, batch_size=55, n_epoches=5,
-                  corrupt_lvs=[0.1, 0.2, 0.3])
+                  keep_prob=0.05, pretrain_lr=0.005, finetune_lr=0.1,
+                  batch_size=55, n_epoches=5, corrupt_lvs=[0.1, 0.1, 0.1])
         sda.pretrain(sess, train_x, test_x)
-        sda.
+        sda.finetune(sess, train_x, train_y, test_x, test_y)
