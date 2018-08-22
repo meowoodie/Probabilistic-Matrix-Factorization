@@ -195,8 +195,10 @@ class SdA(object):
         '''
         A customized supervised layer for fine tuning SdA. This function can be
         highly overrided in accordance with the requirements of the application.
-        In general, the supervised layer has to include a supervised (response)
-        variable `self.y`, a `self.finetune_cost` for monitoring the loss of the
+        In this case, the supervised layer is a fully connected softmax layer
+        which is used to predict the label of the input x. In general, the
+        supervised layer has to include a supervised (response) variable
+        `self.y`, a `self.finetune_cost` for monitoring the loss of the
         fine-tuning, and a `self.optimizer` to minimize the difference between
         prediction (depend on `x`) and `y`.
         '''
@@ -307,8 +309,8 @@ if __name__ == '__main__':
         # da.fit(sess, train_x, test_x)
 
         # Stacked Denoising Autoencoder
-        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[200, 100, 50],
-                  keep_prob=0.05, pretrain_lr=0.005, finetune_lr=0.1,
-                  batch_size=55, n_epoches=5, corrupt_lvs=[0.1, 0.1, 0.1])
+        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[200, 100],
+                  keep_prob=0.05, pretrain_lr=0.005, finetune_lr=0.01,
+                  batch_size=55, n_epoches=5, corrupt_lvs=[0.1, 0.1])
         sda.pretrain(sess, train_x, test_x)
         sda.finetune(sess, train_x, train_y, test_x, test_y)
