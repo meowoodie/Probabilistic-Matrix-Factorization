@@ -127,7 +127,7 @@ class dA(object):
                 sample_test_x = test_x[np.random.choice(n_tests, self.batch_size), :]
                 # use input_tensor as the input of the model if the model is stacked
                 # otherwise use self.x
-                if self.is_stacked:
+                if self.is_stacked and input_tensor is not None:
                     placeholder = input_tensor
                 else:
                     placeholder = self.x
@@ -305,18 +305,27 @@ if __name__ == '__main__':
     test_x  = np.vstack([img.reshape(-1,) for img in mnist.test.images])
     test_y  = np.reshape(mnist.test.labels, (test_x.shape[0], 1))
 
+    print(test_x.shape)
+    print(test_y.shape)
+
     n_visible = train_x.shape[1]
-    n_hidden  = 100
+    n_hidden  = 300
 
     with tf.Session() as sess:
-        # # Single Denoising Autoencoder
-        # da = dA('test', n_feature, n_hidden,
-        #          keep_prob=0.05, lr=0.005, batch_size=55, n_epoches=10, corrupt_lv=0.2)
-        # da.fit(sess, train_x, test_x)
+        # Single Denoising Autoencoder
+        da = dA('test', n_visible, n_hidden,
+                 keep_prob=0.05, lr=0.01, batch_size=1000, n_epoches=5, corrupt_lv=0.1)
+        da.fit(sess, train_x, test_x)
+        reconstructed_x = da.get_reconstructed_x(sess, test_x[0:2])
+
+        print(reconstructed_x.shape)
+
+        from utils import show_mnist_images
+        show_mnist_images(reconstructed_x)
 
         # Stacked Denoising Autoencoder
-        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[500, 400, 300, 200, 100],
-                  keep_prob=0.05, pretrain_lr=0.005, finetune_lr=0.1,
-                  batch_size=55, n_epoches=10, corrupt_lvs=[0.2, 0.2, 0.1, 0.1, 0])
-        sda.pretrain(sess, train_x, test_x, pretrained=False)
-        sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=True)
+        # sda = SdA(n_visible=n_visible, hidden_layers_sizes=[500, 500, 500, 500],
+        #           keep_prob=0.05, pretrain_lr=0.01, finetune_lr=0.01,
+        #           batch_size=55, n_epoches=20, corrupt_lvs=[0.1, 0.1, 0.1, 0.1])
+        # sda.pretrain(sess, train_x, test_x, pretrained=False)
+        # sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=True)
