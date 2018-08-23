@@ -65,10 +65,12 @@ class dA(object):
         noise_mask  = np.random.binomial(1, 1 - corrupt_lv, (self.batch_size, n_visible)).astype('float32')
         corrupted_x = tf.multiply(noise_mask, self.x)
         # hidden encode
-        self.z = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, self.w), self.b_vis))
-        self.z = tf.nn.dropout(self.z, keep_prob) # probability to keep units
+        self.clean_z = tf.nn.sigmoid(tf.add(tf.matmul(self.x, self.w), self.b_vis))
+        self.z       = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, self.w), self.b_vis))
+        self.z       = tf.nn.dropout(self.z, keep_prob) # probability to keep units
         # reconstructed input
-        self.x_hat     = tf.nn.sigmoid(tf.add(tf.matmul(self.z, self.w_prime), self.b_hid))
+        self.clean_x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.clean_z, self.w_prime), self.b_hid))
+        self.x_hat       = tf.nn.sigmoid(tf.add(tf.matmul(self.z, self.w_prime), self.b_hid))
         # define loss and optimizer, minimize the mean squared error
         self.cost      = tf.reduce_mean(tf.pow(self.x_hat - self.x, 2))
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
@@ -78,14 +80,14 @@ class dA(object):
         Calculate hidden output (z) given input x if the dA is not stacked.
         '''
         assert not self.is_stacked, 'It is a stacked dA, which is unable to calculate hidden output.'
-        return sess.run(self.z, feed_dict={self.x: x})
+        return sess.run(self.clean_z, feed_dict={self.x: x})
 
     def get_reconstructed_x(self, sess, x):
         '''
         Calculate reconstructed x (x_hat) given input x if the dA is not stacked.
         '''
         assert not self.is_stacked, 'It is a stacked dA, which is unable to calculate reconstructed x.'
-        return sess.run(self.x_hat, feed_dict={self.x: x})
+        return sess.run(self.clean_x_hat, feed_dict={self.x: x})
 
     def fit(self, sess, train_x, test_x, pretrained=False, input_tensor=None):
         '''
@@ -203,7 +205,7 @@ class SdA(object):
         prediction (depend on `x`) and `y`.
         '''
         self.y             = tf.placeholder(tf.float32, (None, 1))
-        logistic_pred      = tf.nn.softmax(self.dA_layers[-1].z) # Softmax
+        logistic_pred      = tf.nn.softmax(self.dA_layers[-1].clean_z) # Softmax
         self.finetune_cost = tf.reduce_mean(-tf.reduce_sum(self.y * tf.log(logistic_pred), reduction_indices=1))
         self.optimizer     = tf.train.GradientDescentOptimizer(self.finetune_lr).minimize(self.finetune_cost)
 
@@ -230,9 +232,13 @@ class SdA(object):
                   file=sys.stderr)
             dA_layer.fit(sess, train_x, test_x, pretrained=True, input_tensor=self.x)
 
-    def finetune(self, sess, train_x, train_y, test_x, test_y):
+    def finetune(self, sess, train_x, train_y, test_x, test_y, pretrained=True):
         '''
         '''
+        if not pretrained:
+            # initialize the session in tensorflow
+            init = tf.global_variables_initializer()
+            sess.run(init)
         print('[%s] --- Fine-tune Phase ---' % arrow.now(), file=sys.stderr)
         # number of dataset
         n_trains  = train_x.shape[0]
@@ -309,8 +315,8 @@ if __name__ == '__main__':
         # da.fit(sess, train_x, test_x)
 
         # Stacked Denoising Autoencoder
-        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[200, 100],
-                  keep_prob=0.05, pretrain_lr=0.005, finetune_lr=0.01,
-                  batch_size=55, n_epoches=5, corrupt_lvs=[0.1, 0.1])
-        sda.pretrain(sess, train_x, test_x)
-        sda.finetune(sess, train_x, train_y, test_x, test_y)
+        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[500, 400, 300, 200, 100],
+                  keep_prob=0.05, pretrain_lr=0.005, finetune_lr=0.1,
+                  batch_size=55, n_epoches=10, corrupt_lvs=[0.2, 0.2, 0.1, 0.1, 0])
+        sda.pretrain(sess, train_x, test_x, pretrained=False)
+        sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=True)
