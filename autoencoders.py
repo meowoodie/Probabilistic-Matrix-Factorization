@@ -41,8 +41,8 @@ class dA(object):
         self.w     = w     # weights
         self.b_vis = b_vis # bias of visible layer
         self.b_hid = b_hid # bias of hidden layer
-        self.z     = None  # hidden encode output
-        self.x     = None  # visible input
+        self.z       = None  # hidden encode output
+        self.x       = None  # visible input
         self.is_stacked = False
         # initialization of weights
         if not self.w:
@@ -65,11 +65,11 @@ class dA(object):
         noise_mask  = np.random.binomial(1, 1 - corrupt_lv, (self.batch_size, n_visible)).astype('float32')
         corrupted_x = tf.multiply(noise_mask, self.x)
         # hidden encode
-        self.clean_z = tf.nn.sigmoid(tf.add(tf.matmul(self.x, self.w), self.b_vis))
         self.z       = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, self.w), self.b_vis))
+        self.clean_z = tf.nn.sigmoid(tf.add(tf.matmul(self.x, self.w), self.b_vis))
         # reconstructed input
-        self.clean_x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.clean_z, self.w_prime), self.b_hid))
         self.x_hat       = tf.nn.sigmoid(tf.add(tf.matmul(tf.nn.dropout(self.z, keep_prob), self.w_prime), self.b_hid))
+        self.clean_x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.clean_z, self.w_prime), self.b_hid))
         # define loss and optimizer, minimize the mean squared error
         self.cost      = tf.reduce_mean(tf.pow(self.x_hat - self.x, 2))
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
@@ -169,6 +169,7 @@ class SdA(object):
         self.n_epoches   = n_epoches
         self.batch_size  = batch_size
         self.n_layers    = len(hidden_layers_sizes)
+        self.hidden_layers_sizes = hidden_layers_sizes
         self.x           = tf.placeholder(tf.float32, (None, n_visible))
         # construct forward layers of dAs
         for i in range(self.n_layers):
@@ -177,10 +178,10 @@ class SdA(object):
                 input_size  = n_visible
                 layer_input = self.x
             else:
-                input_size  = hidden_layers_sizes[i - 1]
+                input_size  = self.hidden_layers_sizes[i - 1]
                 layer_input = self.dA_layers[i - 1].clean_z
             # output size of current dA layer
-            output_size = hidden_layers_sizes[i]
+            output_size = self.hidden_layers_sizes[i]
             # initialize current dA layer
             dA_layer = dA(model_name='stacked_layer_%d_dA' % i,
                           n_visible=input_size, n_hidden=output_size,
@@ -191,24 +192,33 @@ class SdA(object):
             self.dA_layers.append(dA_layer)
         # construct supervised layer for fine tuning
         self.supervised_layer()
-        # # construct backward layers of dAs
-        # for i in list(reversed(range(self.n_layers))):
-        #     # input size and input variable of current dA layer
-        #     if
-
+        # construct backward layers of dAs
+        self.reconstructed_layer()
 
     def get_reconstructed_x(self, sess, x):
         '''
-        Calculate reconstructed x (x_hat) given input x if the dA is not stacked.
+        Calculate reconstructed x (x_hat) given input x.
         '''
-        # return sess.run(self.pred, feed_dict={self.x: x})
-        # return
-        pass
+        return sess.run(self.x_hat, feed_dict={self.x: x})
 
     def get_predicted_y(self, sess, x):
         '''
+        Calculate predicted y given input x.
         '''
         return sess.run(self.pred, feed_dict={self.x: x})
+
+    def reconstructed_layer(self):
+        '''
+        Multiple layers for reconstructing input x. The reconstructed layer
+        essentially stacked each reconstructed layer of the dAs and use the last
+        output as the reconstructed x.
+        '''
+        self.x_hat = self.dA_layers[-1].clean_z
+        for i in list(reversed(range(self.n_layers))):
+            w_prime    = self.dA_layers[i].w_prime
+            b_hid      = self.dA_layers[i].b_hid
+            self.x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.x_hat, w_prime), b_hid))
+
 
     def supervised_layer(self, n_output=10):
         '''
@@ -221,25 +231,27 @@ class SdA(object):
         fine-tuning, and a `self.optimizer` to minimize the difference between
         prediction (depend on `x`) and `y`.
         '''
+        # weights and bias for the supervised layer (softmax layer)
         w = tf.get_variable(name='softmax_weights', shape=(self.dA_layers[-1].n_hidden, n_output),
                             dtype=tf.float32, initializer=tf.random_normal_initializer())
         b = tf.get_variable(name='softmax_bias', shape=(n_output),
                             dtype=tf.float32, initializer=tf.random_normal_initializer())
-        self.y    = tf.placeholder(tf.float32, (None, 1)) # label indicating the number of the image
+        # label indicating the number of the image
+        self.y    = tf.placeholder(tf.float32, (None, 1))
         one_hot_y = tf.one_hot(tf.cast(tf.reshape(self.y, [-1]), tf.int32), 10)
+        # prediction made by a softmax layer
         self.pred = tf.nn.softmax(tf.add(tf.matmul(self.dA_layers[-1].clean_z, w), b))
+        # cross-entrophy cost for softmax regression
         self.finetune_cost = tf.reduce_mean(-tf.reduce_sum(one_hot_y * tf.log(self.pred + 1e-20), axis=1))
+        # accuracy of the predcition
         self.correct_pred  = tf.equal(tf.argmax(self.pred, axis=1), tf.argmax(one_hot_y, axis=1))
         self.accuracy      = tf.reduce_mean(tf.cast(self.correct_pred, tf.float32))
+        # optimizer of the supervised layer
         self.optimizer     = tf.train.GradientDescentOptimizer(self.finetune_lr).minimize(self.finetune_cost)
 
     def pretrain(self, sess, train_x, test_x, pretrained=False):
         '''
-        Generates a list of functions, each of them implementing one
-        step in trainnig the dA corresponding to the layer with same index.
-        The function will require as input the minibatch index, and to train
-        a dA you just need to iterate, calling the corresponding function on
-        all minibatch indexes.
+        Pretrain the SdA only with the input x without supervision.
         '''
         if not pretrained:
             # initialize the session in tensorflow
@@ -258,6 +270,7 @@ class SdA(object):
 
     def finetune(self, sess, train_x, train_y, test_x, test_y, pretrained=True):
         '''
+        Fine tune the model with labeling information y.
         '''
         if not pretrained:
             # initialize the session in tensorflow
@@ -363,12 +376,13 @@ if __name__ == '__main__':
 
         # Stacked Denoising Autoencoder
         sda = SdA(n_visible=n_visible, hidden_layers_sizes=[700],
-                  keep_prob=0.05, pretrain_lr=0.01, finetune_lr=1e-2,
+                  keep_prob=0.05, pretrain_lr=1e-2, finetune_lr=5e-2,
                   batch_size=1000, n_epoches=25, corrupt_lvs=[0.1])
         sda.pretrain(sess, train_x, test_x, pretrained=False)
-        sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=False)
+        sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=True)
 
-        # reconstructed_x = sda.get_reconstructed_x(sess, test_x[0:10])
+        reconstructed_x = sda.get_reconstructed_x(sess, test_x[0:10])
+
         # Plot reconstructed mnist figures
-        # show_mnist_images(reconstructed_x)
-        # show_mnist_images(test_x[0:10])
+        show_mnist_images(reconstructed_x)
+        show_mnist_images(test_x[0:10])
