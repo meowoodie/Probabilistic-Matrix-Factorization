@@ -67,10 +67,9 @@ class dA(object):
         # hidden encode
         self.clean_z = tf.nn.sigmoid(tf.add(tf.matmul(self.x, self.w), self.b_vis))
         self.z       = tf.nn.sigmoid(tf.add(tf.matmul(corrupted_x, self.w), self.b_vis))
-        self.z       = tf.nn.dropout(self.z, keep_prob) # probability to keep units
         # reconstructed input
         self.clean_x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.clean_z, self.w_prime), self.b_hid))
-        self.x_hat       = tf.nn.sigmoid(tf.add(tf.matmul(self.z, self.w_prime), self.b_hid))
+        self.x_hat       = tf.nn.sigmoid(tf.add(tf.matmul(tf.nn.dropout(self.z, keep_prob), self.w_prime), self.b_hid))
         # define loss and optimizer, minimize the mean squared error
         self.cost      = tf.reduce_mean(tf.pow(self.x_hat - self.x, 2))
         self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
@@ -140,8 +139,8 @@ class dA(object):
                 avg_train_loss.append(train_loss)
                 avg_test_loss.append(test_loss)
             # training log ouput
-            avg_train_loss = np.mean(avg_train_loss) / float(self.batch_size)
-            avg_test_loss  = np.mean(avg_test_loss) / float(self.batch_size)
+            avg_train_loss = np.mean(avg_train_loss)
+            avg_test_loss  = np.mean(avg_test_loss)
             print('[%s] Epoch %d' % (arrow.now(), e), file=sys.stderr)
             print('[%s] Training loss:\t%f' % (arrow.now(), avg_train_loss), file=sys.stderr)
             print('[%s] Testing loss:\t%f' % (arrow.now(), avg_test_loss), file=sys.stderr)
@@ -171,7 +170,7 @@ class SdA(object):
         self.batch_size  = batch_size
         self.n_layers    = len(hidden_layers_sizes)
         self.x           = tf.placeholder(tf.float32, (None, n_visible))
-        # construct multiple layers of dAs
+        # construct forward layers of dAs
         for i in range(self.n_layers):
             # input size and input variable of current dA layer
             if i == 0:
@@ -179,7 +178,7 @@ class SdA(object):
                 layer_input = self.x
             else:
                 input_size  = hidden_layers_sizes[i - 1]
-                layer_input = self.dA_layers[i - 1].z
+                layer_input = self.dA_layers[i - 1].clean_z
             # output size of current dA layer
             output_size = hidden_layers_sizes[i]
             # initialize current dA layer
@@ -192,8 +191,26 @@ class SdA(object):
             self.dA_layers.append(dA_layer)
         # construct supervised layer for fine tuning
         self.supervised_layer()
+        # # construct backward layers of dAs
+        # for i in list(reversed(range(self.n_layers))):
+        #     # input size and input variable of current dA layer
+        #     if
 
-    def supervised_layer(self):
+
+    def get_reconstructed_x(self, sess, x):
+        '''
+        Calculate reconstructed x (x_hat) given input x if the dA is not stacked.
+        '''
+        # return sess.run(self.pred, feed_dict={self.x: x})
+        # return
+        pass
+
+    def get_predicted_y(self, sess, x):
+        '''
+        '''
+        return sess.run(self.pred, feed_dict={self.x: x})
+
+    def supervised_layer(self, n_output=10):
         '''
         A customized supervised layer for fine tuning SdA. This function can be
         highly overrided in accordance with the requirements of the application.
@@ -204,9 +221,16 @@ class SdA(object):
         fine-tuning, and a `self.optimizer` to minimize the difference between
         prediction (depend on `x`) and `y`.
         '''
-        self.y             = tf.placeholder(tf.float32, (None, 1))
-        logistic_pred      = tf.nn.softmax(self.dA_layers[-1].clean_z) # Softmax
-        self.finetune_cost = tf.reduce_mean(-tf.reduce_sum(self.y * tf.log(logistic_pred), reduction_indices=1))
+        w = tf.get_variable(name='softmax_weights', shape=(self.dA_layers[-1].n_hidden, n_output),
+                            dtype=tf.float32, initializer=tf.random_normal_initializer())
+        b = tf.get_variable(name='softmax_bias', shape=(n_output),
+                            dtype=tf.float32, initializer=tf.random_normal_initializer())
+        self.y    = tf.placeholder(tf.float32, (None, 1)) # label indicating the number of the image
+        one_hot_y = tf.one_hot(tf.cast(tf.reshape(self.y, [-1]), tf.int32), 10)
+        self.pred = tf.nn.softmax(tf.add(tf.matmul(self.dA_layers[-1].clean_z, w), b))
+        self.finetune_cost = tf.reduce_mean(-tf.reduce_sum(one_hot_y * tf.log(self.pred + 1e-20), axis=1))
+        self.correct_pred  = tf.equal(tf.argmax(self.pred, axis=1), tf.argmax(one_hot_y, axis=1))
+        self.accuracy      = tf.reduce_mean(tf.cast(self.correct_pred, tf.float32))
         self.optimizer     = tf.train.GradientDescentOptimizer(self.finetune_lr).minimize(self.finetune_cost)
 
     def pretrain(self, sess, train_x, test_x, pretrained=False):
@@ -261,7 +285,9 @@ class SdA(object):
             np.random.shuffle(shuffled_order)
             # training iterations over batches
             avg_train_loss = []
+            avg_train_acc  = []
             avg_test_loss  = []
+            avg_test_acc   = []
             for batch in range(n_batches):
                 idx       = np.arange(self.batch_size * batch, self.batch_size * (batch + 1))
                 batch_idx = np.mod(idx, n_trains).astype('int32')
@@ -274,17 +300,27 @@ class SdA(object):
                 # Optimize autoencoder
                 sess.run(self.optimizer, feed_dict={self.x: batch_x, self.y: batch_y})
                 # loss for train data and test data
-                train_loss = sess.run(self.finetune_cost, feed_dict={self.x: batch_x, self.y: batch_y})
-                test_loss  = sess.run(self.finetune_cost, feed_dict={self.x: batch_x, self.y: batch_y})
+                train_loss, train_acc = sess.run(
+                    [self.finetune_cost, self.accuracy],
+                    feed_dict={self.x: batch_x, self.y: batch_y})
+                test_loss, test_acc   = sess.run(
+                    [self.finetune_cost, self.accuracy],
+                    feed_dict={self.x: sample_test_x, self.y: sample_test_y})
                 # append results to list
                 avg_train_loss.append(train_loss)
+                avg_train_acc.append(train_acc)
                 avg_test_loss.append(test_loss)
+                avg_test_acc.append(test_acc)
             # training log ouput
-            avg_train_loss = np.mean(avg_train_loss) / float(self.batch_size)
-            avg_test_loss  = np.mean(avg_test_loss) / float(self.batch_size)
+            avg_train_loss = np.mean(avg_train_loss)
+            avg_train_acc  = np.mean(avg_train_acc)
+            avg_test_loss  = np.mean(avg_test_loss)
+            avg_test_acc   = np.mean(avg_test_acc)
             print('[%s] Epoch %d' % (arrow.now(), e), file=sys.stderr)
             print('[%s] Training loss:\t%f' % (arrow.now(), avg_train_loss), file=sys.stderr)
             print('[%s] Testing loss:\t%f' % (arrow.now(), avg_test_loss), file=sys.stderr)
+            print('[%s] Training accuracy:\t%f' % (arrow.now(), avg_train_acc), file=sys.stderr)
+            print('[%s] Testing accuracy:\t%f' % (arrow.now(), avg_test_acc), file=sys.stderr)
 
 
 
@@ -309,23 +345,30 @@ if __name__ == '__main__':
     print(test_y.shape)
 
     n_visible = train_x.shape[1]
-    n_hidden  = 300
+    n_hidden  = 700
 
+    from utils import show_mnist_images
     with tf.Session() as sess:
         # Single Denoising Autoencoder
-        da = dA('test', n_visible, n_hidden,
-                 keep_prob=0.05, lr=0.01, batch_size=1000, n_epoches=5, corrupt_lv=0.1)
-        da.fit(sess, train_x, test_x)
-        reconstructed_x = da.get_reconstructed_x(sess, test_x[0:2])
+        # - This is the best params that I can find for reconstructing the
+        #   best quality of images
 
-        print(reconstructed_x.shape)
-
-        from utils import show_mnist_images
-        show_mnist_images(reconstructed_x)
+        # da = dA('test', n_visible, n_hidden,
+        #          keep_prob=0.05, lr=0.01, batch_size=1000, n_epoches=25, corrupt_lv=0.1)
+        # da.fit(sess, train_x, test_x)
+        # reconstructed_x = da.get_reconstructed_x(sess, test_x[0:10])
+        # # Plot reconstructed mnist figures
+        # show_mnist_images(reconstructed_x)
+        # show_mnist_images(test_x[0:10])
 
         # Stacked Denoising Autoencoder
-        # sda = SdA(n_visible=n_visible, hidden_layers_sizes=[500, 500, 500, 500],
-        #           keep_prob=0.05, pretrain_lr=0.01, finetune_lr=0.01,
-        #           batch_size=55, n_epoches=20, corrupt_lvs=[0.1, 0.1, 0.1, 0.1])
-        # sda.pretrain(sess, train_x, test_x, pretrained=False)
-        # sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=True)
+        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[700],
+                  keep_prob=0.05, pretrain_lr=0.01, finetune_lr=1e-2,
+                  batch_size=1000, n_epoches=25, corrupt_lvs=[0.1])
+        sda.pretrain(sess, train_x, test_x, pretrained=False)
+        sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=False)
+
+        # reconstructed_x = sda.get_reconstructed_x(sess, test_x[0:10])
+        # Plot reconstructed mnist figures
+        # show_mnist_images(reconstructed_x)
+        # show_mnist_images(test_x[0:10])
