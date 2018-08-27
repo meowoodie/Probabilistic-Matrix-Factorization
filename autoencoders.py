@@ -72,7 +72,7 @@ class dA(object):
         self.clean_x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.clean_z, self.w_prime), self.b_hid))
         # define loss and optimizer, minimize the mean squared error
         self.cost      = tf.reduce_mean(tf.pow(self.x_hat - self.x, 2))
-        self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost)
+        self.optimizer = tf.train.AdamOptimizer(self.lr).minimize(self.cost, var_list=[self.w, self.b_vis, self.b_hid])
 
     def get_hidden_output(self, sess, x):
         '''
@@ -193,7 +193,7 @@ class SdA(object):
         # construct supervised layer for fine tuning
         self.supervised_layer()
         # construct backward layers of dAs
-        self.reconstructed_layer()
+        self.reconstructed_layer(keep_prob=keep_prob)
 
     def get_reconstructed_x(self, sess, x):
         '''
@@ -207,7 +207,7 @@ class SdA(object):
         '''
         return sess.run(self.pred, feed_dict={self.x: x})
 
-    def reconstructed_layer(self):
+    def reconstructed_layer(self, keep_prob):
         '''
         Multiple layers for reconstructing input x. The reconstructed layer
         essentially stacked each reconstructed layer of the dAs and use the last
@@ -217,8 +217,7 @@ class SdA(object):
         for i in list(reversed(range(self.n_layers))):
             w_prime    = self.dA_layers[i].w_prime
             b_hid      = self.dA_layers[i].b_hid
-            self.x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.x_hat, w_prime), b_hid))
-
+            self.x_hat = tf.nn.sigmoid(tf.add(tf.matmul(tf.nn.dropout(self.x_hat, keep_prob), w_prime), b_hid))
 
     def supervised_layer(self, n_output=10):
         '''
@@ -375,14 +374,15 @@ if __name__ == '__main__':
         # show_mnist_images(test_x[0:10])
 
         # Stacked Denoising Autoencoder
-        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[700],
-                  keep_prob=0.05, pretrain_lr=1e-2, finetune_lr=5e-2,
-                  batch_size=1000, n_epoches=25, corrupt_lvs=[0.1])
+        sda = SdA(n_visible=n_visible, hidden_layers_sizes=[700, 600],
+                  keep_prob=0.05, pretrain_lr=1e-1, finetune_lr=1e-1,
+                  batch_size=1000, n_epoches=20, corrupt_lvs=[0.1, 0.1])
         sda.pretrain(sess, train_x, test_x, pretrained=False)
         sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=True)
 
-        reconstructed_x = sda.get_reconstructed_x(sess, test_x[0:10])
+        test_sample = test_x[0:10]
+        reconstructed_x = sda.get_reconstructed_x(sess, test_sample)
 
         # Plot reconstructed mnist figures
         show_mnist_images(reconstructed_x)
-        show_mnist_images(test_x[0:10])
+        show_mnist_images(test_sample)
