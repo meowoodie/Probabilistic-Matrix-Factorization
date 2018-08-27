@@ -193,7 +193,7 @@ class SdA(object):
         # construct supervised layer for fine tuning
         self.supervised_layer()
         # construct backward layers of dAs
-        self.reconstructed_layer(keep_prob=keep_prob)
+        self.reconstructed_layer()
 
     def get_reconstructed_x(self, sess, x):
         '''
@@ -207,7 +207,7 @@ class SdA(object):
         '''
         return sess.run(self.pred, feed_dict={self.x: x})
 
-    def reconstructed_layer(self, keep_prob):
+    def reconstructed_layer(self):
         '''
         Multiple layers for reconstructing input x. The reconstructed layer
         essentially stacked each reconstructed layer of the dAs and use the last
@@ -217,7 +217,7 @@ class SdA(object):
         for i in list(reversed(range(self.n_layers))):
             w_prime    = self.dA_layers[i].w_prime
             b_hid      = self.dA_layers[i].b_hid
-            self.x_hat = tf.nn.sigmoid(tf.add(tf.matmul(tf.nn.dropout(self.x_hat, keep_prob), w_prime), b_hid))
+            self.x_hat = tf.nn.sigmoid(tf.add(tf.matmul(self.x_hat, w_prime), b_hid))
 
     def supervised_layer(self, n_output=10):
         '''
@@ -380,7 +380,7 @@ if __name__ == '__main__':
         sda.pretrain(sess, train_x, test_x, pretrained=False)
         sda.finetune(sess, train_x, train_y, test_x, test_y, pretrained=True)
 
-        test_sample = test_x[0:10]
+        test_sample     = test_x[0:10]
         reconstructed_x = sda.get_reconstructed_x(sess, test_sample)
 
         # Plot reconstructed mnist figures
